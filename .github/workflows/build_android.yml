@@ -26,17 +26,14 @@ jobs:
         echo "Clearing pip cache..."
         python -m pip cache purge
         
-        echo "Attempting to install PySide6==6.7.1 first..."
-        python -m pip install --verbose pyside6==6.7.1
+        echo "Attempting to install PySide6==6.7.1 with high verbosity..."
+        python -m pip install -vvv pyside6==6.7.1
         
-        echo "Attempting to install pyside6-tools==6.7.1 by direct URL and with high verbosity..."
-        # Direct URL for the Python 3.11 compatible wheel of pyside6-tools 6.7.1
-        PYSIDE_TOOLS_WHEEL_URL="https://files.pythonhosted.org/packages/51/e8/960a820364315df5a0c88a96c19613459e7f5e2c28f0bf2f08252d63c0e8/pyside6_tools-6.7.1-cp311-cp311-manylinux_2_28_x86_64.whl"
-        python -m pip install --verbose "$PYSIDE_TOOLS_WHEEL_URL"
-
-        # As a final check, list installed packages related to PySide
+        echo "Attempting to install pyside6-tools==6.7.1 from PyPI index with high verbosity..."
+        python -m pip install -vvv pyside6-tools==6.7.1
+        
         echo "Listing installed PySide packages..."
-        python -m pip list | grep -i pyside
+        python -m pip list | grep -i pyside || echo "No PySide packages found."
 
     # ----- Crucial Step: Setup Android SDK & NDK -----
     - name: Setup Android SDK and NDK
