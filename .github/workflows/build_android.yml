@@ -13,71 +13,161 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4 # Updated to v4
 
     - name: Set up Python
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v5 # Updated to v5
       with:
         python-version: '3.11' # Choose a compatible Python version
 
     - name: Install PySide6 and build tools
       run: |
-        pip install pyside6 pyside6-tools # pyside6-android-deploy might be part of tools or separate
+        python -m pip install --upgrade pip
+        pip install pyside6 pyside6-tools
+        # pyside6-android-deploy should be part of pyside6-tools
+        # If pyside6-android-deploy is a separate package or needs specific version:
+        # pip install pyside6-android-deploy
 
     # ----- Crucial Step: Setup Android SDK & NDK -----
     # This is the most complex part. You might use a pre-existing Docker image
     # or dedicated GitHub Actions for Android.
     - name: Setup Android SDK and NDK
-      # Option 1: Use an action like android-actions/setup-android@v2
-      # uses: android-actions/setup-android@v2
+      # Option 1: Use an action like android-actions/setup-android (recommended for simplicity)
+      # uses: android-actions/setup-android@v3 # Check for the latest version of this action
       # with:
-      #   sdk-version: 'platforms;android-33' # Example
-      #   ndk-version: '25.1.8937393' # Example, find a version compatible with your Qt
-      #   cmake-version: '3.22.1' # Example
+      #   sdk-version: 'platforms;android-33' # Example API level
+      #   ndk-version: '25.2.9519653' # Example NDK version, check compatibility with Qt
+      #   cmake-version: '3.22.1' # Example CMake version
       # Option 2: Manually download and set up within the runner (more complex)
       run: |
-        echo "Setting up Android SDK/NDK - This needs to be implemented"
-        # Example (very simplified, actual setup is more involved):
-        # export ANDROID_HOME=$HOME/android-sdk
-        # export ANDROID_NDK_HOME=$ANDROID_HOME/ndk-bundle # Or specific NDK path
-        # export PATH=$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/platform-tools
-        # Download and extract SDK, NDK, accept licenses, etc.
+        echo "ANDROID_HOME: $ANDROID_HOME"
+        echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+        echo "JAVA_HOME: $JAVA_HOME"
+        echo "PATH: $PATH"
+        echo "--------------------------------------------------------------------"
+        echo " Placeholder for Android SDK & NDK setup."
+        echo " You MUST implement this step for the build to succeed."
+        echo " Consider using an action like 'android-actions/setup-android'"
+        echo " or ensure your runner has SDK/NDK pre-installed and configured."
+        echo " Example: export ANDROID_HOME=/path/to/your/android-sdk"
+        echo " Example: export ANDROID_NDK_HOME=/path/to/your/android-ndk-bundle"
+        echo " You will also need to accept SDK licenses if installing manually."
+        echo "--------------------------------------------------------------------"
+        # For a GitHub-hosted runner, you might need something like:
+        # sudo apt-get update
+        # sudo apt-get install -y --no-install-recommends openjdk-17-jdk # Ensure Java 11 or 17 for modern Android
+        # export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 # Adjust path if needed
+        # export PATH=$JAVA_HOME/bin:$PATH
+        #
+        # # Example of manual SDK/NDK download (very simplified - proper setup is more involved)
+        # # wget https://dl.google.com/android/repository/commandlinetools-linux-XXXXXXX_latest.zip
+        # # mkdir -p $HOME/android-sdk
+        # # unzip commandlinetools-linux-XXXXXXX_latest.zip -d $HOME/android-sdk/cmdline-tools/latest
+        # # export ANDROID_HOME=$HOME/android-sdk
+        # # export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/tools
+        # # yes | sdkmanager --licenses # Accept licenses
+        # # sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;25.2.9519653" # Install components
+        # # export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653 # Path might vary
+        #
+        # # If using android-actions/setup-android, it handles this for you.
+        if [ -z "$ANDROID_HOME" ] || [ -z "$ANDROID_NDK_HOME" ]; then
+          echo "::error::ANDROID_HOME or ANDROID_NDK_HOME is not set. Please configure Android SDK/NDK."
+          exit 1
+        fi
+        if [ -z "$JAVA_HOME" ]; then
+            echo "Warning: JAVA_HOME is not explicitly set. Relying on system default."
+            # Attempt to find common JDK locations on GitHub runners
+            if [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+                export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+            elif [ -d "/usr/lib/jvm/java-11-openjdk-amd64" ]; then
+                export JAVA_HOME="/usr/lib/jvm/java-11-openjdk-amd64"
+            else
+                echo "::error::Could not automatically determine JAVA_HOME. Please set it up."
+                exit 1
+            fi
+            export PATH="$JAVA_HOME/bin:$PATH"
+            echo "Set JAVA_HOME to $JAVA_HOME"
+        fi
+        java -version
+        # Verify sdkmanager and ndk-build are available if set up
+        # sdkmanager --version || true
+        # $ANDROID_NDK_HOME/ndk-build --version || true
+
 
     - name: Set up Qt for Android
       run: |
-        echo "Setting up Qt for Android - This needs to be implemented"
-        # This would involve:
-        # 1. Downloading the appropriate Qt for Android package (e.g., from Qt archives or using aqtinstall)
-        #    aqt install-qt android android <qt_version> --arch <qt_arch_for_android> -m qt6明文 # Example
-        # 2. Setting QT_ANDROID_HOME or similar environment variables.
-        #    export QT_ANDROID_DIR=/path/to/your/Qt/version/android
-        #    export PATH=$QT_ANDROID_DIR/bin:$PATH
+        echo "--------------------------------------------------------------------"
+        echo " Placeholder for Qt for Android setup."
+        echo " You MUST implement this step for the build to succeed."
+        echo " Consider using 'aqt install-qt' to download Qt for Android."
+        echo " Example: aqt install-qt android android 6.7.0 android_arm64_v8a -m qt6core qt6gui qt6widgets qt6network qt6quick qtpyshared"
+        echo " You would then need to set environment variables like QT_ANDROID_DIR or add Qt tools to PATH."
+        echo " Example: export QT_PATH=/path/to/Qt/6.7.0/android"
+        echo " Example: export PATH=\$QT_PATH/bin:\$PATH"
+        echo "--------------------------------------------------------------------"
+        # Example using aqtinstall (uncomment and adapt if you use it)
+        # pip install aqtinstall
+        # export QT_ANDROID_VERSION=6.7.0 # Specify your Qt version
+        # export QT_ANDROID_ARCH=android_arm64_v8a # Specify target architecture
+        # aqt install-qt android android $QT_ANDROID_VERSION $QT_ANDROID_ARCH -m qt6core qt6gui qt6widgets qtpyshared # Add other modules as needed
+        # export QT_PATH=$HOME/Qt/$QT_ANDROID_VERSION/$QT_ANDROID_ARCH # Path where aqt installs by default
+        # export PATH=$QT_PATH/bin:$PATH
+        # export QT_PLUGIN_PATH=$QT_PATH/plugins
+        # export QML_IMPORT_PATH=$QT_PATH/qml
+        # if [ ! -d "$QT_PATH" ]; then
+        #   echo "::error::Qt for Android path not found: $QT_PATH. Please ensure Qt is installed and path is correct."
+        #   exit 1
+        # fi
+        # echo "QT_PATH set to $QT_PATH"
+        # which androiddeployqt # Check if Qt's androiddeployqt is in PATH
 
     - name: Configure and Build APK
+      env:
+        # These might be needed by pyside6-android-deploy or the underlying Qt tools
+        # Adjust paths based on your actual setup in the steps above
+        ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }} # Common alias for ANDROID_HOME
+        ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_HOME }} # Common alias for ANDROID_NDK_HOME
       run: |
-        # The command from the documentation is pyside6-android-deploy
-        # You'll need to navigate to your project directory
-        # cd my_qt_android_app
         echo "Current directory: $(pwd)"
         ls -la
-        # Assume your main.py, AndroidManifest.xml, build.gradle are in the root or a subdirectory
-        # The exact command might need adjustments based on your project structure and tool version
-        pyside6-android-deploy --name "MyQtApp" \
-                               --package "org.example.myqtandroidapp" \
-                               --arch armeabi-v7a \
-                               --sdk-path "$ANDROID_HOME" \
-                               --ndk-path "$ANDROID_NDK_HOME" \
-                               --jdk-path "$JAVA_HOME" \ # Often JAVA_HOME is pre-set in GitHub runners
-                               --android-abis "armeabi-v7a,arm64-v8a,x86,x86_64" \ # Choose target ABIs
-                               --entry-point "main.py" \ # Your main Python script
-                               --build-dir "build_android" \
-                               --deploy-path "deployment_output"
-        # Check the documentation for pyside6-android-deploy for all options.
-        # It might require your AndroidManifest.xml and build.gradle to be in specific locations
-        # or be passed as arguments.
+        # Create a dummy main.py if it's not in the root for testing purposes
+        # if [ ! -f main.py ]; then
+        #  echo "import sys; from PySide6.QtWidgets import QApplication, QLabel; app = QApplication(sys.argv); label = QLabel('Hello Test'); label.show(); sys.exit(app.exec())" > main.py
+        # fi
+
+        # Ensure build directory exists and is clean
+        mkdir -p build_android
+        rm -rf build_android/*
+        mkdir -p deployment_output
+        rm -rf deployment_output/*
+
+        # The command from the documentation is pyside6-android-deploy
+        # Adjust arguments as necessary.
+        # Ensure your AndroidManifest.xml and any other required files are present.
+        # It's often best to run this from the directory containing main.py or specify paths.
+        pyside6-android-deploy \
+          --name "MyQtApp" \
+          --package "org.example.myqtandroidapp" \
+          --arch "arm64-v8a" \
+          --sdk-path "$ANDROID_HOME" \
+          --ndk-path "$ANDROID_NDK_HOME" \
+          --jdk-path "$JAVA_HOME" \
+          --android-abis "arm64-v8a,armeabi-v7a" \
+          --entry-point "./main.py" \
+          --build-dir "./build_android" \
+          --output "./deployment_output" \
+          --verbose
+          # Add --android-manifest "./AndroidManifest.xml" if not in a standard location
+          # Add --gradle-project-path "./build.gradle" or path to android project folder if needed
+          # Add --qt-path "$QT_PATH" if pyside6-android-deploy cannot find Qt automatically
+
+    - name: List deployment output
+      run: |
+        ls -R deployment_output
 
     - name: Upload APK artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4 # Updated to v4
       with:
         name: my-qt-android-app-apk
         path: deployment_output/**/*.apk # Adjust path based on where pyside6-android-deploy outputs the APK
+        if-no-files-found: error # Fails the step if no APK is found
