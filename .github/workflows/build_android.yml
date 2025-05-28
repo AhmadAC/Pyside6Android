@@ -1,14 +1,77 @@
+# .github/workflows/build_android.yml
+name: Build Qt for Python Android APK
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    env:
+      QT_VERSION: '6.7.1'
+      QT_ANDROID_ARCH: 'android_arm64_v8a' # Options: android_arm64_v8a, android_x86_64, android_armeabi_v7a
+      ANDROID_SDK_VERSION: '34'
+      ANDROID_NDK_VERSION: '26.1.10909125' # Check for NDK versions compatible with your Qt and Android SDK
+      JAVA_VERSION: '17' # Android SDK often requires Java 17
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Set up Java (JDK)
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: ${{ env.JAVA_VERSION }}
+
+    - name: Install PySide6
+      run: |
+        echo "Verifying Python and pip versions:"
+        python --version
+        which python
+        python -m pip --version
+        echo "--------------------------------------------------------------------"
+        
+        echo "Upgrading pip, setuptools, and wheel..."
+        python -m pip install --upgrade pip setuptools wheel
+        
+        echo "Clearing pip cache..."
+        python -m pip cache purge
+        
+        echo "Attempting to install PySide6==${{ env.QT_VERSION }} with high verbosity..."
+        python -m pip install -vvv "pyside6==${{ env.QT_VERSION }}"
+        
+        echo "Listing installed PySide packages..."
+        python -m pip list | grep -i pyside || echo "No PySide packages found."
+
+        echo "Checking if pyside6-android-deploy is available in PATH:"
+        which pyside6-android-deploy || echo "::warning::pyside6-android-deploy not found in PATH initially."
+
+    - name: Setup Android SDK and NDK
+      uses: android-actions/setup-android@v3
+      with:
+        sdk-version: ${{ env.ANDROID_SDK_VERSION }}
+        ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+        # build-tools-version: "34.0.0" # Optional: specify specific build tools
+
     - name: Install Qt for Android using aqtinstall
       run: |
         echo "Installing aqtinstall..."
         python -m pip install aqtinstall
         
         echo "Installing Qt for Android version ${{ env.QT_VERSION }} for ${{ env.QT_ANDROID_ARCH }} on host Linux..."
-        # Corrected: First argument is the host OS (linux), second is the target platform (android)
+        # Corrected host_os to 'linux'
         aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -m qt6core qt6gui qt6widgets qtpyshared qt6svg
         
-        # Set QT_PATH for subsequent steps
-        # The default installation path for aqt is $HOME/Qt
         INSTALLED_QT_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_ANDROID_ARCH }}"
         echo "INSTALLED_QT_PATH=${INSTALLED_QT_PATH}"
         
@@ -21,6 +84,91 @@
         echo "QT_PATH=${INSTALLED_QT_PATH}" >> $GITHUB_ENV
         echo "Qt for Android installed at: ${INSTALLED_QT_PATH}"
         
-        # Add Qt tools to PATH for subsequent steps
         echo "${INSTALLED_QT_PATH}/bin" >> $GITHUB_PATH
         echo "Added ${INSTALLED_QT_PATH}/bin to GITHUB_PATH"
+
+    - name: Verify Environment Variables and Tools
+      run: |
+        echo "--- Verifying environment variables ---"
+        echo "ANDROID_HOME: $ANDROID_HOME"
+        echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+        echo "JAVA_HOME: $JAVA_HOME"
+        echo "QT_PATH: $QT_PATH" 
+        echo "python version: $(python --version)"
+        echo "java version:"
+        java -version
+        echo "pyside6-android-deploy location: $(which pyside6-android-deploy || echo 'not found')"
+        echo "androiddeployqt location: $(which androiddeployqt || echo 'not found')"
+        echo "PATH: $PATH"
+        
+        if [ -z "$QT_PATH" ]; then
+          echo "::error::QT_PATH is not set after the Qt installation step."
+          exit 1
+        fi
+        if ! command -v androiddeployqt &> /dev/null; then
+            echo "::error::androiddeployqt command could not be found. Ensure \$QT_PATH/bin was correctly added to the PATH."
+            exit 1
+        fi
+
+    - name: Configure and Build APK
+      run: |
+        echo "Current directory: $(pwd)"
+        ls -la # List files to ensure main.py and others are present
+        
+        # Ensure pyside6-android-deploy is executable and in PATH (Python scripts dir should be in PATH)
+        if ! command -v pyside6-android-deploy &> /dev/null; then
+            echo "::error::pyside6-android-deploy command could not be found. Checking common Python script paths..."
+            PYTHON_BIN_PATH=$(dirname $(which python))
+            if [ -f "$PYTHON_BIN_PATH/pyside6-android-deploy" ]; then
+                echo "Found pyside6-android-deploy in $PYTHON_BIN_PATH, ensuring it's in PATH."
+                export PATH="$PYTHON_BIN_PATH:$PATH"
+            elif [ -f "$HOME/.local/bin/pyside6-android-deploy" ]; then
+                echo "Found pyside6-android-deploy in $HOME/.local/bin, adding to PATH for this step."
+                export PATH="$HOME/.local/bin:$PATH"
+            fi
+            # Re-check
+            if ! command -v pyside6-android-deploy &> /dev/null; then
+                 echo "::error::Still cannot find pyside6-android-deploy. Exiting."
+                 exit 1
+            fi
+        fi
+        
+        mkdir -p build_android && rm -rf build_android/*
+        mkdir -p deployment_output && rm -rf deployment_output/*
+        
+        echo "Running pyside6-android-deploy..."
+        # Construct android_abis from QT_ANDROID_ARCH, and add others if needed
+        PRIMARY_ABI="${QT_ANDROID_ARCH#android_}" # e.g., arm64_v8a -> arm64-v8a
+        # You might want to include other ABIs like armeabi-v7a depending on your target devices
+        # For simplicity, using only the primary ABI for now. Add "armeabi-v7a" if needed.
+        ANDROID_ABIS_VALUE="$PRIMARY_ABI" 
+        # If you want to build for more ABIs add them here:
+        # if [ "$PRIMARY_ABI" = "arm64-v8a" ]; then
+        #   ANDROID_ABIS_VALUE="arm64-v8a,armeabi-v7a"
+        # fi
+
+        pyside6-android-deploy \
+          --name "MyQtApp" \
+          --package "org.example.myqtandroidapp" \
+          --arch "$PRIMARY_ABI" \
+          --sdk-path "$ANDROID_HOME" \
+          --ndk-path "$ANDROID_NDK_HOME" \
+          --jdk-path "$JAVA_HOME" \
+          --qt-path "$QT_PATH" \
+          --android-abis "$ANDROID_ABIS_VALUE" \
+          --entry-point "./main.py" \
+          --build-dir "./build_android" \
+          --output "./deployment_output" \
+          --verbose
+
+    - name: List deployment output
+      run: |
+        echo "Listing contents of deployment_output:"
+        ls -R deployment_output
+
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: my-qt-android-app-apk
+        path: deployment_output/**/*.apk
+        if-no-files-found: error
