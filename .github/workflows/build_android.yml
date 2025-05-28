@@ -20,20 +20,28 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install PySide6 and build tools
+    - name: Install PySide6
       run: |
+        echo "Verifying Python and pip versions:"
+        python --version
+        which python
+        python -m pip --version
+        echo "--------------------------------------------------------------------"
+        
+        echo "Upgrading pip, setuptools, and wheel..."
         python -m pip install --upgrade pip setuptools wheel
+        
         echo "Clearing pip cache..."
         python -m pip cache purge
         
         echo "Attempting to install PySide6==6.7.1 with high verbosity..."
         python -m pip install -vvv pyside6==6.7.1
         
-        echo "Attempting to install pyside6-tools==6.7.1 from PyPI index with high verbosity..."
-        python -m pip install -vvv pyside6-tools==6.7.1
-        
         echo "Listing installed PySide packages..."
         python -m pip list | grep -i pyside || echo "No PySide packages found."
+
+        echo "Checking if pyside6-android-deploy is available in PATH:"
+        which pyside6-android-deploy || echo "::warning::pyside6-android-deploy not found in PATH. This might cause issues in the build step."
 
     # ----- Crucial Step: Setup Android SDK & NDK -----
     - name: Setup Android SDK and NDK
@@ -46,27 +54,40 @@ jobs:
         echo " Placeholder for Android SDK & NDK setup."
         echo " You MUST implement this step for the build to succeed."
         echo " Consider using an action like 'android-actions/setup-android@v3' or 'kmaida/setup-android-sdk@v0.4.0'"
+        echo " Example for 'android-actions/setup-android@v3':"
+        echo "# - name: Set up Android SDK and NDK"
+        echo "#   uses: android-actions/setup-android@v3"
+        echo "#   with:"
+        echo "#     sdk-version: '33' # Or your desired SDK version
+        echo "#     ndk-version: '25.1.8937393' # Or your desired NDK version"
         echo "--------------------------------------------------------------------"
+        # This is a basic check; a robust setup (e.g., using a GitHub Action) is needed.
         if [ -z "$ANDROID_HOME" ] || [ -z "$ANDROID_NDK_HOME" ]; then
-          echo "::error::ANDROID_HOME or ANDROID_NDK_HOME is not set. Please configure Android SDK/NDK."
+          echo "::error::ANDROID_HOME or ANDROID_NDK_HOME is not set. Please configure Android SDK/NDK using a dedicated action or manual setup."
+          # Example: If you were to manually install, you would set these.
+          # For GitHub-hosted runners, common paths for actions/setup-java might set JAVA_HOME
+          # but ANDROID_HOME and ANDROID_NDK_HOME need explicit setup for Android builds.
           exit 1
         fi
+        
+        # Attempt to set JAVA_HOME if not already set
         if [ -z "$JAVA_HOME" ]; then
             echo "Warning: JAVA_HOME is not explicitly set. Relying on system default or attempting to find common JDKs."
+            # Common JDK paths on GitHub Actions Ubuntu runners (may vary)
             if [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
                 export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
             elif [ -d "/usr/lib/jvm/java-11-openjdk-amd64" ]; then
                 export JAVA_HOME="/usr/lib/jvm/java-11-openjdk-amd64"
-            elif [ -n "$JDK_HOME" ]; then
+            elif [ -n "$JDK_HOME" ]; then # Some actions might set JDK_HOME
                 export JAVA_HOME="$JDK_HOME"
             else
-                echo "::error::Could not automatically determine JAVA_HOME. Please set it up."
+                echo "::error::Could not automatically determine JAVA_HOME. Please ensure it is set up, for example, using actions/setup-java."
                 exit 1
             fi
             export PATH="$JAVA_HOME/bin:$PATH"
         fi
         echo "Using JAVA_HOME: $JAVA_HOME"
-        java -version
+        java -version || echo "::warning::Java command not found or failed. Ensure JDK is correctly installed and configured."
 
     - name: Set up Qt for Android
       run: |
@@ -74,33 +95,78 @@ jobs:
         echo " Placeholder for Qt for Android setup."
         echo " You MUST implement this step for the build to succeed."
         echo " Use 'aqt install-qt' to download Qt 6.7.1 for Android to match PySide6 6.7.1."
-        echo " Example: aqt install-qt android android 6.7.1 android_arm64_v8a -m qt6core qt6gui qt6widgets qtpyshared"
-        echo " Example: export QT_PATH=\$HOME/Qt/6.7.1/android_arm64_v8a"
+        echo " Example aqt install command:"
+        echo "# python -m pip install aqtinstall"
+        echo "# export QT_VERSION=6.7.1"
+        echo "# export QT_ANDROID_ARCH=android_arm64_v8a # or android_x86_64, etc."
+        echo "# aqt install-qt android android \$QT_VERSION \$QT_ANDROID_ARCH -m qt6core qt6gui qt6widgets qtpyshared"
+        echo "# export QT_PATH=\$HOME/Qt/\$QT_VERSION/\$QT_ANDROID_ARCH"
+        echo "# export PATH=\$QT_PATH/bin:\$PATH"
         echo "--------------------------------------------------------------------"
-        # Example using aqtinstall (uncomment and adapt)
-        # pip install aqtinstall
-        # export QT_VERSION=6.7.1
-        # export QT_ANDROID_ARCH=android_arm64_v8a
-        # aqt install-qt android android $QT_VERSION $QT_ANDROID_ARCH -m qt6core qt6gui qt6widgets qtpyshared
-        # export QT_PATH=$HOME/Qt/$QT_VERSION/$QT_ANDROID_ARCH
-        # export PATH=$QT_PATH/bin:$PATH
-        # if [ ! -d "$QT_PATH" ]; then
-        #   echo "::error::Qt for Android path not found: $QT_PATH."
-        #   exit 1
-        # fi
+        # This is a basic check; actual installation and path setup are required.
+        # Ensure QT_PATH is set by your Qt installation step
+        # For example: export QT_PATH=$HOME/Qt/6.7.1/android_arm64_v8a
+        if [ -z "$QT_PATH" ]; then
+           echo "::error::QT_PATH is not set. Please install Qt for Android and set QT_PATH."
+           # exit 1 # Commenting out exit to allow testing other parts if Qt isn't the immediate focus
+        elif [ ! -d "$QT_PATH" ]; then
+           echo "::error::Qt for Android path not found: $QT_PATH. Ensure Qt is installed correctly to this location."
+           # exit 1
+        fi
+        # Check for androiddeployqt (usually in $QT_PATH/bin)
         # if ! which androiddeployqt > /dev/null; then
-        #    echo "::error::androiddeployqt not found in PATH."
-        #    exit 1
+        #    echo "::warning::androiddeployqt not found in PATH. Ensure \$QT_PATH/bin is added to PATH."
         # fi
 
     - name: Configure and Build APK
       env:
-        ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
-        ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_HOME }}
+        # ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }} # Often just ANDROID_HOME is sufficient
+        # ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_HOME }} # Often just ANDROID_NDK_HOME is sufficient
+        # QT_PATH: ${{ env.QT_PATH }} # Ensure QT_PATH is available if set in previous step
+        LD_LIBRARY_PATH: "${QT_PATH}/lib:${LD_LIBRARY_PATH}" # May be needed for tools
       run: |
         echo "Current directory: $(pwd)"
+        ls -la
+        
+        echo "ANDROID_HOME: $ANDROID_HOME"
+        echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+        echo "JAVA_HOME: $JAVA_HOME"
+        echo "QT_PATH: $QT_PATH"
+        echo "PATH: $PATH"
+        
+        # Ensure required variables are set before attempting build
+        if [ -z "$ANDROID_HOME" ] || [ -z "$ANDROID_NDK_HOME" ] || [ -z "$JAVA_HOME" ] || [ -z "$QT_PATH" ]; then
+          echo "::error::One or more required environment variables (ANDROID_HOME, ANDROID_NDK_HOME, JAVA_HOME, QT_PATH) are not set. Cannot proceed with build."
+          exit 1
+        fi
+        
+        # Ensure pyside6-android-deploy is executable and in PATH
+        if ! command -v pyside6-android-deploy &> /dev/null; then
+            echo "::error::pyside6-android-deploy command could not be found. Ensure PySide6 is installed correctly and its scripts directory is in the PATH."
+            # Attempt to find it in common Python script locations if PATH is an issue
+            # This is a fallback, proper PATH setup is preferred
+            if [ -f "$HOME/.local/bin/pyside6-android-deploy" ]; then
+                echo "Found pyside6-android-deploy in $HOME/.local/bin, adding to PATH for this step."
+                export PATH="$HOME/.local/bin:$PATH"
+            elif [ -f "/opt/hostedtoolcache/Python/3.11*/x64/bin/pyside6-android-deploy" ]; then # Adjust Python version/path as needed
+                 PY_SCRIPT_PATH=$(dirname $(find /opt/hostedtoolcache/Python/3.11* -name pyside6-android-deploy -print -quit))
+                 if [ -n "$PY_SCRIPT_PATH" ]; then
+                    echo "Found pyside6-android-deploy in $PY_SCRIPT_PATH, adding to PATH for this step."
+                    export PATH="$PY_SCRIPT_PATH:$PATH"
+                 fi
+            fi
+
+            # Re-check after attempting to fix PATH
+            if ! command -v pyside6-android-deploy &> /dev/null; then
+                 echo "::error::Still cannot find pyside6-android-deploy. Exiting."
+                 exit 1
+            fi
+        fi
+        
         mkdir -p build_android && rm -rf build_android/*
         mkdir -p deployment_output && rm -rf deployment_output/*
+        
+        echo "Running pyside6-android-deploy..."
         pyside6-android-deploy \
           --name "MyQtApp" \
           --package "org.example.myqtandroidapp" \
@@ -108,6 +174,7 @@ jobs:
           --sdk-path "$ANDROID_HOME" \
           --ndk-path "$ANDROID_NDK_HOME" \
           --jdk-path "$JAVA_HOME" \
+          --qt-path "$QT_PATH" \
           --android-abis "arm64-v8a,armeabi-v7a" \
           --entry-point "./main.py" \
           --build-dir "./build_android" \
