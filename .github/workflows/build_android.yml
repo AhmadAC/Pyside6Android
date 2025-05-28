@@ -14,7 +14,8 @@ jobs:
     env:
       QT_VERSION: '6.7.1'
       QT_ANDROID_ARCH: 'android_arm64_v8a'
-      QT_HOST_ARCH: 'linux_gcc_64'
+      QT_HOST_ARCH_INPUT: 'linux_gcc_64' # Arch for aqt input
+      QT_HOST_ARCH_DIR: 'gcc_64'        # Actual directory name created by aqt for the host
       ANDROID_PLATFORM_API_LEVEL: '34'
       ANDROID_BUILD_TOOLS_VERSION: '34.0.0'
       ANDROID_NDK_VERSION: '26.1.10909125'
@@ -64,15 +65,15 @@ jobs:
         echo "Installing aqtinstall..."
         python -m pip install aqtinstall
         
-        echo "Listing available Qt modules for Host (Linux Desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH }})..."
-        aqt list-qt linux desktop --modules ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH }} || echo "Warning: Failed to list host Qt modules, continuing with install attempt..."
+        echo "Listing available Qt modules for Host (Linux Desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }})..."
+        aqt list-qt linux desktop --modules ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }} || echo "Warning: Failed to list host Qt modules, continuing with install attempt..."
         
-        echo "Installing Qt ${{ env.QT_VERSION }} for Host (Linux Desktop - ${{ env.QT_HOST_ARCH }}) into $HOME/Qt ..."
-        # MODIFIED: Added -O "$HOME/Qt" to specify output directory
-        aqt install-qt linux desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH }} -O "$HOME/Qt"
+        echo "Installing Qt ${{ env.QT_VERSION }} for Host (Linux Desktop - ${{ env.QT_HOST_ARCH_INPUT }}) into $HOME/Qt ..."
+        # Install host Qt without -m, let aqt install default components which include qttools
+        aqt install-qt linux desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }} -O "$HOME/Qt"
         
-        # This path should now be correct
-        QT_HOST_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_HOST_ARCH }}"
+        # MODIFIED: Use QT_HOST_ARCH_DIR for path construction
+        QT_HOST_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_HOST_ARCH_DIR }}"
         if [ ! -d "$QT_HOST_INSTALLED_PATH" ]; then
           echo "::error::Qt for Host path not found after installation: $QT_HOST_INSTALLED_PATH."
           echo "Listing $HOME/Qt to see what was installed (if anything):"
@@ -97,10 +98,9 @@ jobs:
         aqt list-qt linux android --modules ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} || echo "Warning: Failed to list Android Qt modules, continuing with install attempt..."
 
         echo "Installing Qt ${{ env.QT_VERSION }} for Android (${{ env.QT_ANDROID_ARCH }}) into $HOME/Qt ..."
-        # MODIFIED: Added -O "$HOME/Qt" to specify output directory
+        # The Android path uses the full QT_ANDROID_ARCH name
         aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -m qt6svg qtpyshared -O "$HOME/Qt"
         
-        # This path should now be correct
         ANDROID_QT_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_ANDROID_ARCH }}"
         echo "ANDROID_QT_INSTALLED_PATH=${ANDROID_QT_INSTALLED_PATH}"
         
