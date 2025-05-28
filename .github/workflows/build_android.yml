@@ -65,14 +65,13 @@ jobs:
         python -m pip install aqtinstall
         
         echo "Listing available Qt modules for Host (Linux Desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH }})..."
-        # This command's output (already provided in your logs) confirms 'qttools' is not listed as an add-on module.
         aqt list-qt linux desktop --modules ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH }} || echo "Warning: Failed to list host Qt modules, continuing with install attempt..."
         
-        echo "Installing Qt ${{ env.QT_VERSION }} for Host (Linux Desktop - ${{ env.QT_HOST_ARCH }})..."
-        # MODIFIED: Try installing host Qt without specifying -m.
-        # This should install the default components, which typically include development tools.
-        aqt install-qt linux desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH }}
+        echo "Installing Qt ${{ env.QT_VERSION }} for Host (Linux Desktop - ${{ env.QT_HOST_ARCH }}) into $HOME/Qt ..."
+        # MODIFIED: Added -O "$HOME/Qt" to specify output directory
+        aqt install-qt linux desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH }} -O "$HOME/Qt"
         
+        # This path should now be correct
         QT_HOST_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_HOST_ARCH }}"
         if [ ! -d "$QT_HOST_INSTALLED_PATH" ]; then
           echo "::error::Qt for Host path not found after installation: $QT_HOST_INSTALLED_PATH."
@@ -81,20 +80,11 @@ jobs:
           exit 1
         fi
         
-        # Explicitly check for androiddeployqt after installation
         if [ ! -f "${QT_HOST_INSTALLED_PATH}/bin/androiddeployqt" ]; then
             echo "::error:: androiddeployqt not found in ${QT_HOST_INSTALLED_PATH}/bin after host Qt installation."
             echo "Listing contents of ${QT_HOST_INSTALLED_PATH}/bin/ to verify:"
             ls -la "${QT_HOST_INSTALLED_PATH}/bin/" || echo "Directory ${QT_HOST_INSTALLED_PATH}/bin/ not found or empty."
-            # As a diagnostic, check common alternative locations if Qt packaging changed drastically
-            if [ -d "${QT_HOST_INSTALLED_PATH}/Tools/QtTools/bin" ]; then
-                 echo "Found ${QT_HOST_INSTALLED_PATH}/Tools/QtTools/bin, listing its contents:"
-                 ls -la "${QT_HOST_INSTALLED_PATH}/Tools/QtTools/bin"
-            elif [ -d "${QT_HOST_INSTALLED_PATH}/libexec" ]; then
-                 echo "Found ${QT_HOST_INSTALLED_PATH}/libexec, listing its contents:"
-                 ls -la "${QT_HOST_INSTALLED_PATH}/libexec"
-            fi
-            exit 1 # Fail if androiddeployqt is not where expected
+            exit 1
         else
             echo "Found androiddeployqt at ${QT_HOST_INSTALLED_PATH}/bin/androiddeployqt"
         fi
@@ -106,9 +96,11 @@ jobs:
         echo "Listing available Qt modules for Android (${{ env.QT_ANDROID_ARCH }})..."
         aqt list-qt linux android --modules ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} || echo "Warning: Failed to list Android Qt modules, continuing with install attempt..."
 
-        echo "Installing Qt ${{ env.QT_VERSION }} for Android (${{ env.QT_ANDROID_ARCH }})..."
-        aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -m qt6svg qtpyshared 
+        echo "Installing Qt ${{ env.QT_VERSION }} for Android (${{ env.QT_ANDROID_ARCH }}) into $HOME/Qt ..."
+        # MODIFIED: Added -O "$HOME/Qt" to specify output directory
+        aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -m qt6svg qtpyshared -O "$HOME/Qt"
         
+        # This path should now be correct
         ANDROID_QT_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_ANDROID_ARCH }}"
         echo "ANDROID_QT_INSTALLED_PATH=${ANDROID_QT_INSTALLED_PATH}"
         
