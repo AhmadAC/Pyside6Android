@@ -20,7 +20,8 @@ jobs:
       ANDROID_BUILD_TOOLS_VERSION: '34.0.0'
       ANDROID_NDK_VERSION: '26.1.10909125'
       JAVA_VERSION: '17'
-      PYSIDE_ANDROID_WHEELS_DIR: "${{ github.workspace }}/android_wheels"
+      # Directory to download the HOST wheels (for pyside6-android-deploy tool itself)
+      HOST_WHEELS_DIR: "${{ github.workspace }}/host_wheels"
       DEPLOY_CONFIG_FILE: "pyside6-android-deploy.json"
 
     steps:
@@ -38,66 +39,51 @@ jobs:
         distribution: 'temurin'
         java-version: ${{ env.JAVA_VERSION }}
 
-    - name: Install PySide6 (for tools) and Download Android Wheels
+    - name: Download Host PySide6 Wheels and Install PySide6
       run: |
         echo "Verifying Python and pip versions:"
         python --version
         which python
         python -m pip --version
         echo "--------------------------------------------------------------------"
-        python -m pip install --upgrade pip setuptools wheel wget # Ensure wget is available
+        python -m pip install --upgrade pip setuptools wheel
+        python -m pip cache purge
+        
+        mkdir -p ${{ env.HOST_WHEELS_DIR }}
+        
+        echo "Downloading HOST PySide6 and Shiboken6 wheels to ${{ env.HOST_WHEELS_DIR }}..."
+        # These are for the x86_64 Linux runner environment
+        python -m pip download --no-deps pyside6==${{ env.QT_VERSION }} -d "${{ env.HOST_WHEELS_DIR }}"
+        python -m pip download --no-deps shiboken6==${{ env.QT_VERSION }} -d "${{ env.HOST_WHEELS_DIR }}"
 
-        echo "Installing PySide6==${{ env.QT_VERSION }} for build tools (pyside6-android-deploy)..."
+        echo "Listing downloaded HOST wheels:"
+        ls -R "${{ env.HOST_WHEELS_DIR }}"
+
+        # Find the exact wheel file names for the HOST
+        # Assuming Python 3.11 on the runner, so cp311
+        PYSIDE_HOST_WHEEL_FILE=$(ls "${{ env.HOST_WHEELS_DIR }}"/PySide6-${{ env.QT_VERSION }}*cp311*-manylinux*.whl | head -n 1)
+        SHIBOKEN_HOST_WHEEL_FILE=$(ls "${{ env.HOST_WHEELS_DIR }}"/shiboken6-${{ env.QT_VERSION }}*cp311*-manylinux*.whl | head -n 1)
+
+        if [ -z "$PYSIDE_HOST_WHEEL_FILE" ] || [ ! -f "$PYSIDE_HOST_WHEEL_FILE" ]; then
+          echo "::error::PySide6 HOST wheel file not found in ${{ env.HOST_WHEELS_DIR }}"
+          exit 1
+        fi
+        if [ -z "$SHIBOKEN_HOST_WHEEL_FILE" ] || [ ! -f "$SHIBOKEN_HOST_WHEEL_FILE" ]; then
+          echo "::error::Shiboken6 HOST wheel file not found in ${{ env.HOST_WHEELS_DIR }}"
+          exit 1
+        fi
+        
+        echo "PYSIDE_WHEEL_PATH_ENV=$PYSIDE_HOST_WHEEL_FILE" >> "$GITHUB_ENV"
+        echo "SHIBOKEN_WHEEL_PATH_ENV=$SHIBOKEN_HOST_WHEEL_FILE" >> "$GITHUB_ENV"
+        echo "PySide6 HOST wheel path: $PYSIDE_HOST_WHEEL_FILE"
+        echo "Shiboken6 HOST wheel path: $SHIBOKEN_HOST_WHEEL_FILE"
+
+        echo "Installing PySide6==${{ env.QT_VERSION }} (and dependencies) for build tools..."
         python -m pip install -vvv "pyside6==${{ env.QT_VERSION }}"
-        which pyside6-android-deploy || { echo "::error::pyside6-android-deploy not found in PATH after host installation."; exit 1; }
         
-        mkdir -p ${{ env.PYSIDE_ANDROID_WHEELS_DIR }}
-        
-        echo "Determining Android wheel architecture suffix..."
-        ANDROID_WHEEL_ARCH_SUFFIX=""
-        if [ "${{ env.QT_ANDROID_ARCH }}" = "android_arm64_v8a" ]; then
-          ANDROID_WHEEL_ARCH_SUFFIX="android_aarch64"
-        elif [ "${{ env.QT_ANDROID_ARCH }}" = "android_armeabi_v7a" ]; then
-          ANDROID_WHEEL_ARCH_SUFFIX="android_armv7"
-        elif [ "${{ env.QT_ANDROID_ARCH }}" = "android_x86_64" ]; then
-          ANDROID_WHEEL_ARCH_SUFFIX="android_x86_64"
-        elif [ "${{ env.QT_ANDROID_ARCH }}" = "android_x86" ]; then
-          ANDROID_WHEEL_ARCH_SUFFIX="android_x86"
-        else
-          echo "::error::Unsupported QT_ANDROID_ARCH ('${{ env.QT_ANDROID_ARCH }}') for Android wheel suffix determination."
-          exit 1
-        fi
-        echo "Android wheel architecture suffix: $ANDROID_WHEEL_ARCH_SUFFIX"
-
-        # Usually PySide6 wheels for Android are cp39 for older Android versions, check the specific version
-        PYSIDE_ANDROID_WHEEL_URL="https://download.qt.io/official_releases/QtForPython/pyside6/${{ env.QT_VERSION }}/PySide6-${{ env.QT_VERSION }}-cp39-abi3-${ANDROID_WHEEL_ARCH_SUFFIX}.whl"
-        SHIBOKEN_ANDROID_WHEEL_URL="https://download.qt.io/official_releases/QtForPython/pyside6/${{ env.QT_VERSION }}/shiboken6-${{ env.QT_VERSION }}-cp39-abi3-${ANDROID_WHEEL_ARCH_SUFFIX}.whl"
-        
-        echo "Attempting to download PySide6 Android wheel from: $PYSIDE_ANDROID_WHEEL_URL"
-        wget -P "${{ env.PYSIDE_ANDROID_WHEELS_DIR }}" "$PYSIDE_ANDROID_WHEEL_URL"
-        
-        echo "Attempting to download Shiboken6 Android wheel from: $SHIBOKEN_ANDROID_WHEEL_URL"
-        wget -P "${{ env.PYSIDE_ANDROID_WHEELS_DIR }}" "$SHIBOKEN_ANDROID_WHEEL_URL"
-
-        PYSIDE_WHEEL_FILE_NAME="PySide6-${{ env.QT_VERSION }}-cp39-abi3-${ANDROID_WHEEL_ARCH_SUFFIX}.whl"
-        SHIBOKEN_WHEEL_FILE_NAME="shiboken6-${{ env.QT_VERSION }}-cp39-abi3-${ANDROID_WHEEL_ARCH_SUFFIX}.whl"
-        
-        PYSIDE_WHEEL_FULL_PATH="${{ env.PYSIDE_ANDROID_WHEELS_DIR }}/$PYSIDE_WHEEL_FILE_NAME"
-        SHIBOKEN_WHEEL_FULL_PATH="${{ env.PYSIDE_ANDROID_WHEELS_DIR }}/$SHIBOKEN_WHEEL_FILE_NAME"
-
-        if [ ! -f "$PYSIDE_WHEEL_FULL_PATH" ]; then
-          echo "::error::PySide6 Android wheel file not found at $PYSIDE_WHEEL_FULL_PATH after download attempt."
-          ls -R "${{ env.PYSIDE_ANDROID_WHEELS_DIR }}"
-          exit 1
-        fi
-        if [ ! -f "$SHIBOKEN_WHEEL_FULL_PATH" ]; then
-          echo "::error::Shiboken6 Android wheel file not found at $SHIBOKEN_WHEEL_FULL_PATH after download attempt."
-          ls -R "${{ env.PYSIDE_ANDROID_WHEELS_DIR }}"
-          exit 1
-        fi
-        
-        echo "PYSIDE_WHEEL_PATH_ENV=$PYSIDE_WHEEL_FULL_PATH" >> "$GITHUB_ENV"
-        echo "SHIBOKEN_WHEEL_PATH_ENV=$SHIBOKEN_WHEEL_FULL_PATH" >> "$GITHUB_ENV"
+        echo "Listing installed PySide packages (host environment):"
+        python -m pip list | grep -i pyside || echo "No PySide packages found in host environment."
+        which pyside6-android-deploy || { echo "::error::pyside6-android-deploy not found in PATH after installation."; exit 1; }
 
     - name: Setup Android SDK and NDK
       uses: android-actions/setup-android@v3
@@ -127,7 +113,9 @@ jobs:
         echo "${QT_HOST_INSTALLED_PATH}/bin" >> $GITHUB_PATH
 
         echo "Installing Qt ${{ env.QT_VERSION }} for Android (${{ env.QT_ANDROID_ARCH }}) into $HOME/Qt ..."
-        aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -O "$HOME/Qt"
+        # Install Android Qt. This should include qtpyshared and qt6svg by default for this arch.
+        # If it fails because of module names, remove -m qt6svg qtpyshared
+        aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -O "$HOME/Qt" -m qt6svg qtpyshared
         
         ANDROID_QT_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_ANDROID_ARCH }}"
         if [ ! -d "$ANDROID_QT_INSTALLED_PATH" ]; then
@@ -139,54 +127,81 @@ jobs:
     - name: Dynamically update deploy config JSON
       run: |
         if [ ! -f "${{ env.DEPLOY_CONFIG_FILE }}" ]; then
-            echo "::error:: Deployment config file ${{ env.DEPLOY_CONFIG_FILE }} not found in repository."
-            exit 1
+            echo "::error:: Deployment config file ${{ env.DEPLOY_CONFIG_FILE }} not found in repository. Please create it."
+            # Create a default one if not found, for robustness, but it's better to have it in repo
+            cat <<EOF > ${{ env.DEPLOY_CONFIG_FILE }}
+            {
+                "appName": "MyQtApp",
+                "applicationPackage": "org.example.myqtandroidapp",
+                "arch": "${QT_ANDROID_ARCH#android_}",
+                "jdkPath": "$JAVA_HOME",
+                "qtPath": "$QT_PATH",
+                "qtHostPath": "$QT_HOST_PATH",
+                "androidAbis": ["${QT_ANDROID_ARCH#android_}"],
+                "entryPoint": "./main.py",
+                "assets": "",
+                "qmlFiles": "",
+                "qmlPaths": [],
+                "useTranslations": false,
+                "translationsPath": "./translations",
+                "translationLanguages": [],
+                "pysidedeployAllowPythonSource": true,
+                "pysidedeployAllowCompiledPlusSource": true,
+                "pysidedeployBlacklist": [],
+                "pysidedeployBasedir": "",
+                "pysidedeployVerboseLevel": 2,
+                "pysidedeployLibLocation": "bundle",
+                "pysidedeployPythonVersion": "3.9"
+            }
+            EOF
+            echo "::warning:: Created a default ${{ env.DEPLOY_CONFIG_FILE }}. It's recommended to commit this file to your repository."
+        else
+            echo "Using existing config file: ${{ env.DEPLOY_CONFIG_FILE }}"
         fi
-        # Use jq to update paths in the JSON config file
-        # Install jq if not present (GitHub runners usually have it)
-        # sudo apt-get update && sudo apt-get install -y jq
         
-        echo "Original config:"
+        echo "Original config content:"
         cat "${{ env.DEPLOY_CONFIG_FILE }}"
-
+        
+        # Install jq if not present
+        if ! command -v jq &> /dev/null; then
+            echo "jq could not be found, installing..."
+            sudo apt-get update -y && sudo apt-get install -y jq
+        fi
+        
         TEMP_CONFIG_FILE="${{ env.DEPLOY_CONFIG_FILE }}.tmp"
+        PRIMARY_ABI="${QT_ANDROID_ARCH#android_}"
 
-        # Update paths in the JSON file
         jq \
+          --arg appName "MyQtApp" \
+          --arg applicationPackage "org.example.myqtandroidapp" \
+          --arg arch "$PRIMARY_ABI" \
           --arg jdkPath "$JAVA_HOME" \
           --arg qtPath "$QT_PATH" \
           --arg qtHostPath "$QT_HOST_PATH" \
-          '.jdkPath = $jdkPath | .qtPath = $qtPath | .qtHostPath = $qtHostPath' \
+          --argjson androidAbis "[\"$PRIMARY_ABI\"]" \
+          --arg entryPoint "./main.py" \
+          '.appName = $appName | .applicationPackage = $applicationPackage | .arch = $arch | .jdkPath = $jdkPath | .qtPath = $qtPath | .qtHostPath = $qtHostPath | .androidAbis = $androidAbis | .entryPoint = $entryPoint' \
           "${{ env.DEPLOY_CONFIG_FILE }}" > "$TEMP_CONFIG_FILE" && mv "$TEMP_CONFIG_FILE" "${{ env.DEPLOY_CONFIG_FILE }}"
 
-        echo "Updated config:"
+        echo "Updated config content:"
         cat "${{ env.DEPLOY_CONFIG_FILE }}"
         
     - name: Configure and Build APK
       run: |
         echo "Current directory: $(pwd)"
-        ls -la
         
-        echo "Using PySide6 Android wheel: ${{ env.PYSIDE_WHEEL_PATH_ENV }}"
-        echo "Using Shiboken6 Android wheel: ${{ env.SHIBOKEN_WHEEL_PATH_ENV }}"
+        echo "Using PySide6 HOST wheel: ${{ env.PYSIDE_WHEEL_PATH_ENV }}"
+        echo "Using Shiboken6 HOST wheel: ${{ env.SHIBOKEN_WHEEL_PATH_ENV }}"
 
-        if [ ! -f "${{ env.PYSIDE_WHEEL_PATH_ENV }}" ]; then
-            echo "::error:: PySide6 Android wheel file not found at ${{ env.PYSIDE_WHEEL_PATH_ENV }}"
-            exit 1
-        fi
-        if [ ! -f "${{ env.SHIBOKEN_WHEEL_PATH_ENV }}" ]; then
-            echo "::error:: Shiboken6 Android wheel file not found at ${{ env.SHIBOKEN_WHEEL_PATH_ENV }}"
-            exit 1
-        fi
+        if [ ! -f "${{ env.PYSIDE_WHEEL_PATH_ENV }}" ]; then exit 1; fi
+        if [ ! -f "${{ env.SHIBOKEN_WHEEL_PATH_ENV }}" ]; then exit 1; fi
         
         mkdir -p build_android && rm -rf build_android/*
         mkdir -p deployment_output && rm -rf deployment_output/*
         
         echo "Running pyside6-android-deploy..."
         
-        # These arguments are generally recognized by the pyside6-android-deploy wrapper
         pyside6-android-deploy \
-          --name "MyQtApp" \
           --sdk-path "$ANDROID_HOME" \
           --ndk-path "$ANDROID_NDK_HOME" \
           --build-dir "./build_android" \
