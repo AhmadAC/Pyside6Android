@@ -20,7 +20,7 @@ jobs:
       ANDROID_BUILD_TOOLS_VERSION: '34.0.0'
       ANDROID_NDK_VERSION: '26.1.10909125'
       JAVA_VERSION: '17'
-      PYSIDE_WHEELS_DIR: "${{ github.workspace }}/pyside_wheels" # Define wheel directory
+      PYSIDE_WHEELS_DIR: "${{ github.workspace }}/pyside_wheels"
 
     steps:
     - name: Checkout code
@@ -48,34 +48,24 @@ jobs:
         python -m pip install --upgrade pip setuptools wheel
         python -m pip cache purge
         
-        # Create directory for wheels
         mkdir -p ${{ env.PYSIDE_WHEELS_DIR }}
         
         echo "Downloading PySide6 and Shiboken6 wheels to ${{ env.PYSIDE_WHEELS_DIR }}..."
-        # Download the specific wheels needed by pyside6-android-deploy
-        # Using --no-deps as we'll install them properly later, we just need the files.
-        # However, to ensure we get the right platform tags, allow pip to resolve.
         python -m pip download pyside6==${{ env.QT_VERSION }} -d "${{ env.PYSIDE_WHEELS_DIR }}"
         python -m pip download shiboken6==${{ env.QT_VERSION }} -d "${{ env.PYSIDE_WHEELS_DIR }}"
-        # Addons and Essentials wheels might also be needed if the tool looks for them by pattern or convention.
-        # For now, let's assume PySide6 wheel includes them or the deploy tool can find them from the installed env.
-        # If further errors related to Addons/Essentials wheels appear, add downloads for them too:
-        # python -m pip download pyside6-addons==${{ env.QT_VERSION }} -d "${{ env.PYSIDE_WHEELS_DIR }}"
-        # python -m pip download pyside6-essentials==${{ env.QT_VERSION }} -d "${{ env.PYSIDE_WHEELS_DIR }}"
 
         echo "Listing downloaded wheels:"
         ls -R "${{ env.PYSIDE_WHEELS_DIR }}"
 
-        # Find the exact wheel file names
-        PYSIDE_WHEEL_FILE=$(ls "${{ env.PYSIDE_WHEELS_DIR }}"/PySide6-${{ env.QT_VERSION }}*.whl | head -n 1)
-        SHIBOKEN_WHEEL_FILE=$(ls "${{ env.PYSIDE_WHEELS_DIR }}"/shiboken6-${{ env.QT_VERSION }}*.whl | head -n 1)
+        PYSIDE_WHEEL_FILE=$(ls "${{ env.PYSIDE_WHEELS_DIR }}"/PySide6-${{ env.QT_VERSION }}*cp39*-manylinux_2_28_x86_64.whl | head -n 1)
+        SHIBOKEN_WHEEL_FILE=$(ls "${{ env.PYSIDE_WHEELS_DIR }}"/shiboken6-${{ env.QT_VERSION }}*cp39*-manylinux_2_28_x86_64.whl | head -n 1)
 
         if [ -z "$PYSIDE_WHEEL_FILE" ] || [ ! -f "$PYSIDE_WHEEL_FILE" ]; then
-          echo "::error::PySide6 wheel file not found in ${{ env.PYSIDE_WHEELS_DIR }}"
+          echo "::error::PySide6 wheel file (cp39 manylinux_2_28_x86_64) not found in ${{ env.PYSIDE_WHEELS_DIR }}"
           exit 1
         fi
         if [ -z "$SHIBOKEN_WHEEL_FILE" ] || [ ! -f "$SHIBOKEN_WHEEL_FILE" ]; then
-          echo "::error::Shiboken6 wheel file not found in ${{ env.PYSIDE_WHEELS_DIR }}"
+          echo "::error::Shiboken6 wheel file (cp39 manylinux_2_28_x86_64) not found in ${{ env.PYSIDE_WHEELS_DIR }}"
           exit 1
         fi
         
@@ -85,8 +75,6 @@ jobs:
         echo "Shiboken6 wheel path: $SHIBOKEN_WHEEL_FILE"
 
         echo "Installing PySide6 from downloaded wheels and PyPI for other dependencies..."
-        # Install PySide6 (which will pull shiboken6 etc. as dependencies if not explicitly listed)
-        # This makes pyside6-android-deploy available
         python -m pip install -vvv "pyside6==${{ env.QT_VERSION }}"
         
         echo "Listing installed PySide packages..."
@@ -102,15 +90,11 @@ jobs:
           platforms;android-${{ env.ANDROID_PLATFORM_API_LEVEL }}
           build-tools;${{ env.ANDROID_BUILD_TOOLS_VERSION }}
           ndk;${{ env.ANDROID_NDK_VERSION }}
-        # accept-licenses: 'true' # Already handled by the action it seems
 
     - name: Install Qt for Host (Linux Desktop) and Android
       run: |
         echo "Installing aqtinstall..."
         python -m pip install aqtinstall
-        
-        echo "Listing available Qt modules for Host (Linux Desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }})..."
-        aqt list-qt linux desktop --modules ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }} || echo "Warning: Failed to list host Qt modules."
         
         echo "Installing Qt ${{ env.QT_VERSION }} for Host (Linux Desktop - ${{ env.QT_HOST_ARCH_INPUT }}) into $HOME/Qt ..."
         aqt install-qt linux desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }} -O "$HOME/Qt"
@@ -132,29 +116,43 @@ jobs:
         echo "Added ${QT_HOST_INSTALLED_PATH}/bin to GITHUB_PATH for host tools"
         echo "${QT_HOST_INSTALLED_PATH}/bin" >> $GITHUB_PATH
 
-        echo "Listing available Qt modules and archives for Android (${{ env.QT_ANDROID_ARCH }})..."
-        aqt list-qt linux android --modules ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} || echo "Warning: Failed to list Android Qt modules."
-        aqt list-qt linux android --archives ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} || echo "Warning: Failed to list Android Qt archives."
-
-        echo "Installing Qt ${{ env.QT_VERSION }} for Android (${{ env.QT_ANDROID_ARCH }}) into $HOME/Qt ..."
-        # Install Android Qt, assuming qtpyshared and necessary svg components are included by default or via qtpyshared dependency.
-        # If specific modules are needed and identified by 'list-qt', they can be added with -m or --archives.
-        aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -O "$HOME/Qt" -m qt6svg qtpyshared
-
+        echo "Attempting to install Qt ${{ env.QT_VERSION }} for Android (${{ env.QT_ANDROID_ARCH }}) into $HOME/Qt ..."
+        # MODIFIED: Remove -m arguments for Android Qt installation.
+        # This will install the default package for the specified Android architecture.
+        # qtpyshared and qt6svg are typically included.
+        aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -O "$HOME/Qt"
+        
         ANDROID_QT_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_ANDROID_ARCH }}"
+        echo "ANDROID_QT_INSTALLED_PATH=${ANDROID_QT_INSTALLED_PATH}"
+        
         if [ ! -d "$ANDROID_QT_INSTALLED_PATH" ]; then
           echo "::error::Qt for Android path not found after installation: $ANDROID_QT_INSTALLED_PATH. Listing $HOME/Qt..."
           ls -R "$HOME/Qt" || echo "$HOME/Qt does not exist."
           exit 1
         fi
-        if [ ! -f "${ANDROID_QT_INSTALLED_PATH}/lib/libpyshared.so" ] && [ ! -f "${ANDROID_QT_INSTALLED_PATH}/plugins/platforms/libpyshared.so" ] && [ ! -f "${ANDROID_QT_INSTALLED_PATH}/lib/aarch64-linux-android/libpyshared.so" ] ; then # Common locations
+        
+        # Verify libpyshared.so (critical for PySide6)
+        if [ ! -f "${ANDROID_QT_INSTALLED_PATH}/lib/libpyshared.so" ] && \
+           [ ! -f "${ANDROID_QT_INSTALLED_PATH}/plugins/platforms/libpyshared.so" ] && \
+           [ ! -f "${ANDROID_QT_INSTALLED_PATH}/lib/aarch64-linux-android/libpyshared.so" ] && \
+           [ ! -f "${ANDROID_QT_INSTALLED_PATH}/arch/${QT_ANDROID_ARCH#android_}/lib/libpyshared.so" ] && \
+           [ ! -f "${ANDROID_QT_INSTALLED_PATH}/plugins/android/libpyshared.so" ] ; then
             echo "::warning:: libpyshared.so not found in common locations within ${ANDROID_QT_INSTALLED_PATH}. PySide6 apps may not run."
-            echo "Listing contents of ${ANDROID_QT_INSTALLED_PATH}/lib/ and ${ANDROID_QT_INSTALLED_PATH}/plugins/platforms/ to verify:"
-            ls -la "${ANDROID_QT_INSTALLED_PATH}/lib/" || echo "Directory ${ANDROID_QT_INSTALLED_PATH}/lib/ not found or empty."
-            ls -la "${ANDROID_QT_INSTALLED_PATH}/plugins/platforms/" || echo "Directory ${ANDROID_QT_INSTALLED_PATH}/plugins/platforms/ not found or empty."
+            echo "Listing contents of ${ANDROID_QT_INSTALLED_PATH} and its subdirectories to verify:"
+            ls -R "${ANDROID_QT_INSTALLED_PATH}" || echo "Directory ${ANDROID_QT_INSTALLED_PATH} not found or empty."
+            # If the build fails later due to missing libpyshared.so, this ls output will be key
         else
-            echo "Found libpyshared.so within ${ANDROID_QT_INSTALLED_PATH}"
+            echo "Found or assumed libpyshared.so to be present within ${ANDROID_QT_INSTALLED_PATH}"
         fi
+
+        # Verify libQt6Svg.so (if your app uses SVG)
+        if [ ! -f "${ANDROID_QT_INSTALLED_PATH}/lib/libQt6Svg.so" ] && \
+           [ ! -f "${ANDROID_QT_INSTALLED_PATH}/arch/${QT_ANDROID_ARCH#android_}/lib/libQt6Svg.so" ] ; then
+             echo "::warning:: libQt6Svg.so not found in common locations within ${ANDROID_QT_INSTALLED_PATH}."
+        else
+            echo "Found or assumed libQt6Svg.so to be present within ${ANDROID_QT_INSTALLED_PATH}"
+        fi
+
         echo "QT_PATH=${ANDROID_QT_INSTALLED_PATH}" >> $GITHUB_ENV
         echo "Qt for Android installed at: ${ANDROID_QT_INSTALLED_PATH}"
 
@@ -198,12 +196,12 @@ jobs:
 
         if [ ! -f "${{ env.PYSIDE_WHEEL_PATH_ENV }}" ]; then
             echo "::error:: PySide6 wheel file not found at ${{ env.PYSIDE_WHEEL_PATH_ENV }}"
-            ls -R "${{ env.PYSIDE_WHEELS_DIR }}" # list contents for debugging
+            ls -R "${{ env.PYSIDE_WHEELS_DIR }}"
             exit 1
         fi
         if [ ! -f "${{ env.SHIBOKEN_WHEEL_PATH_ENV }}" ]; then
             echo "::error:: Shiboken6 wheel file not found at ${{ env.SHIBOKEN_WHEEL_PATH_ENV }}"
-            ls -R "${{ env.PYSIDE_WHEELS_DIR }}" # list contents for debugging
+            ls -R "${{ env.PYSIDE_WHEELS_DIR }}"
             exit 1
         fi
         
