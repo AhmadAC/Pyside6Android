@@ -13,10 +13,11 @@ jobs:
 
     env:
       QT_VERSION: '6.7.1'
-      QT_ANDROID_ARCH: 'android_arm64_v8a' # Options: android_arm64_v8a, android_x86_64, android_armeabi_v7a
-      QT_HOST_ARCH: 'linux_gcc_64' # For the desktop Qt installation on the runner
-      ANDROID_SDK_VERSION: '34'
-      ANDROID_NDK_VERSION: '26.1.10909125'
+      QT_ANDROID_ARCH: 'android_arm64_v8a'
+      QT_HOST_ARCH: 'linux_gcc_64'
+      ANDROID_PLATFORM_API_LEVEL: '34' # Corresponds to platforms;android-34
+      ANDROID_BUILD_TOOLS_VERSION: '34.0.0' # Specific build tools version
+      ANDROID_NDK_VERSION: '26.1.10909125' # NDK version
       JAVA_VERSION: '17'
 
     steps:
@@ -49,10 +50,16 @@ jobs:
         which pyside6-android-deploy || echo "::warning::pyside6-android-deploy not found in PATH initially."
 
     - name: Setup Android SDK and NDK
-      uses: android-actions/setup-android@v3
+      uses: android-actions/setup-android@v3 # Consider updating to v4 or v5 if issues persist and they are stable
       with:
-        sdk-version: ${{ env.ANDROID_SDK_VERSION }}
-        ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+        # Corrected: Use 'packages' input
+        packages: >-
+          platform-tools
+          cmdline-tools;latest
+          platforms;android-${{ env.ANDROID_PLATFORM_API_LEVEL }}
+          build-tools;${{ env.ANDROID_BUILD_TOOLS_VERSION }}
+          ndk;${{ env.ANDROID_NDK_VERSION }}
+        # accept-licenses: 'true' # May be needed if licenses are not pre-accepted on the runner
 
     - name: Install Qt for Host (Linux Desktop) and Android
       run: |
@@ -60,11 +67,13 @@ jobs:
         python -m pip install aqtinstall
         
         echo "Installing Qt ${{ env.QT_VERSION }} for Host (Linux Desktop - ${{ env.QT_HOST_ARCH }})..."
-        aqt install-qt linux desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH }} -m qt6tools
-        # Set QT_HOST_PATH for tools like androiddeployqt might look for it
+        # Corrected: Use 'qtbase' and 'qttools' for host installation. androiddeployqt is in qttools.
+        aqt install-qt linux desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH }} -m qtbase qttools
+        
         QT_HOST_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_HOST_ARCH }}"
         if [ ! -d "$QT_HOST_INSTALLED_PATH" ]; then
           echo "::error::Qt for Host path not found after installation: $QT_HOST_INSTALLED_PATH."
+          ls -R $HOME/Qt || echo "$HOME/Qt does not exist."
           exit 1
         fi
         echo "QT_HOST_PATH=${QT_HOST_INSTALLED_PATH}" >> $GITHUB_ENV
@@ -72,9 +81,10 @@ jobs:
         echo "${QT_HOST_INSTALLED_PATH}/bin" >> $GITHUB_PATH
 
         echo "Installing Qt ${{ env.QT_VERSION }} for Android (${{ env.QT_ANDROID_ARCH }})..."
-        # For Android, core modules are usually part of the arch package. Specify extras like qtpyshared, qt6svg.
-        # qt6svg is an add-on, qtpyshared is for PySide.
-        aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -m qt6svg qtpyshared
+        # For Android: qtpyshared is essential for PySide. qt6svg if you use SVG.
+        # Core modules (qtbase, qtdeclarative if using QML, etc.) are often pulled in by the arch itself or qtpyshared.
+        # If you still get module errors for Android, add `qtbase` here too.
+        aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -m qt6svg qtpyshared 
         
         ANDROID_QT_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_ANDROID_ARCH }}"
         echo "ANDROID_QT_INSTALLED_PATH=${ANDROID_QT_INSTALLED_PATH}"
@@ -85,12 +95,8 @@ jobs:
           exit 1
         fi
         
-        # This QT_PATH should point to the Android Qt installation for pyside6-android-deploy
         echo "QT_PATH=${ANDROID_QT_INSTALLED_PATH}" >> $GITHUB_ENV
         echo "Qt for Android installed at: ${ANDROID_QT_INSTALLED_PATH}"
-        
-        # Add Android Qt tools to PATH if they are different or also needed directly (usually host tools are used)
-        # echo "${ANDROID_QT_INSTALLED_PATH}/bin" >> $GITHUB_PATH # Usually not needed as host's androiddeployqt is used
 
     - name: Verify Environment Variables and Tools
       run: |
@@ -98,8 +104,8 @@ jobs:
         echo "ANDROID_HOME: $ANDROID_HOME"
         echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
         echo "JAVA_HOME: $JAVA_HOME"
-        echo "QT_HOST_PATH: $QT_HOST_PATH" # Path to host Qt installation
-        echo "QT_PATH: $QT_PATH"          # Path to Android Qt installation
+        echo "QT_HOST_PATH: $QT_HOST_PATH"
+        echo "QT_PATH: $QT_PATH"
         echo "python version: $(python --version)"
         echo "java version:"
         java -version
@@ -107,14 +113,8 @@ jobs:
         echo "androiddeployqt location: $(which androiddeployqt || echo 'not found')"
         echo "PATH: $PATH"
         
-        if [ -z "$QT_PATH" ]; then
-          echo "::error::QT_PATH (for Android Qt) is not set after the Qt installation step."
-          exit 1
-        fi
-        if [ -z "$QT_HOST_PATH" ]; then
-          echo "::error::QT_HOST_PATH (for Host Qt) is not set after the Qt installation step."
-          exit 1
-        fi
+        if [ -z "$QT_PATH" ]; then echo "::error::QT_PATH (for Android Qt) is not set."; exit 1; fi
+        if [ -z "$QT_HOST_PATH" ]; then echo "::error::QT_HOST_PATH (for Host Qt) is not set."; exit 1; fi
         if ! command -v androiddeployqt &> /dev/null; then
             echo "::error::androiddeployqt command could not be found. Ensure host Qt's bin directory was correctly added to the PATH."
             exit 1
