@@ -14,11 +14,11 @@ jobs:
     env:
       QT_VERSION: '6.7.1'
       QT_ANDROID_ARCH: 'android_arm64_v8a'
-      QT_HOST_ARCH_INPUT: 'linux_gcc_64' # Arch for aqt input
-      QT_HOST_ARCH_DIR: 'gcc_64'        # Actual directory name created by aqt for the host
+      QT_HOST_ARCH_INPUT: 'linux_gcc_64'
+      QT_HOST_ARCH_DIR: 'gcc_64'
       ANDROID_PLATFORM_API_LEVEL: '34'
       ANDROID_BUILD_TOOLS_VERSION: '34.0.0'
-      ANDROID_NDK_VERSION: '26.1.10909125' # Ensure this NDK version is compatible with your Qt and target
+      ANDROID_NDK_VERSION: '26.1.10909125'
       JAVA_VERSION: '17'
 
     steps:
@@ -37,48 +37,18 @@ jobs:
         java-version: ${{ env.JAVA_VERSION }}
 
     - name: Install PySide6
-      shell: bash
       run: |
-        set -eo pipefail
         echo "Verifying Python and pip versions:"
         python --version
         which python
         python -m pip --version
         echo "--------------------------------------------------------------------"
-        echo "Upgrading pip, setuptools, and wheel..."
         python -m pip install --upgrade pip setuptools wheel
-        
-        echo "Clearing pip cache..."
-        python -m pip cache purge || echo "Pip cache purge failed, continuing..."
-        
+        python -m pip cache purge
         echo "Attempting to install PySide6==${{ env.QT_VERSION }} with high verbosity..."
-        if ! python -m pip install -vvv "pyside6==${{ env.QT_VERSION }}"; then
-          echo "::error::Failed to install PySide6."
-          exit 1
-        fi
-        
-        echo "Listing installed PySide packages..."
-        python -m pip list | grep -i pyside || echo "::warning::No PySide packages found after install attempt."
-
-        echo "Verifying pyside6-android-deploy availability..."
-        if ! which pyside6-android-deploy > /dev/null; then
-            echo "::error::pyside6-android-deploy not found in PATH after PySide6 installation."
-            # Attempt to find it in common Python script locations
-            PYTHON_BIN_PATH=$(dirname $(which python))
-            if [ -f "$PYTHON_BIN_PATH/pyside6-android-deploy" ]; then
-                echo "Found pyside6-android-deploy in $PYTHON_BIN_PATH. Adding to PATH for this job."
-                echo "$PYTHON_BIN_PATH" >> $GITHUB_PATH
-            elif [ -f "$HOME/.local/bin/pyside6-android-deploy" ]; then
-                echo "Found pyside6-android-deploy in $HOME/.local/bin. Adding to PATH for this job."
-                echo "$HOME/.local/bin" >> $GITHUB_PATH
-            fi
-            # Re-check
-            if ! which pyside6-android-deploy > /dev/null; then
-                echo "::error::Still cannot find pyside6-android-deploy after attempting to fix PATH."
-                exit 1
-            fi
-        fi
-        echo "pyside6-android-deploy found at: $(which pyside6-android-deploy)"
+        python -m pip install -vvv "pyside6==${{ env.QT_VERSION }}"
+        python -m pip list | grep -i pyside || echo "No PySide packages found."
+        which pyside6-android-deploy || echo "::warning::pyside6-android-deploy not found in PATH initially."
 
     - name: Setup Android SDK and NDK
       uses: android-actions/setup-android@v3
@@ -89,160 +59,113 @@ jobs:
           platforms;android-${{ env.ANDROID_PLATFORM_API_LEVEL }}
           build-tools;${{ env.ANDROID_BUILD_TOOLS_VERSION }}
           ndk;${{ env.ANDROID_NDK_VERSION }}
-        accept-licenses: 'true' # Accept all necessary SDK licenses
 
     - name: Install Qt for Host (Linux Desktop) and Android
-      shell: bash
       run: |
-        set -eo pipefail
         echo "Installing aqtinstall..."
-        if ! python -m pip install aqtinstall; then
-          echo "::error::Failed to install aqtinstall."
+        python -m pip install aqtinstall
+        
+        echo "Listing available Qt modules for Host (Linux Desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }})..."
+        aqt list-qt linux desktop --modules ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }} || echo "Warning: Failed to list host Qt modules, continuing with install attempt..."
+        
+        echo "Installing Qt ${{ env.QT_VERSION }} for Host (Linux Desktop - ${{ env.QT_HOST_ARCH_INPUT }}) into $HOME/Qt ..."
+        aqt install-qt linux desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }} -O "$HOME/Qt"
+        
+        QT_HOST_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_HOST_ARCH_DIR }}"
+        if [ ! -d "$QT_HOST_INSTALLED_PATH" ]; then
+          echo "::error::Qt for Host path not found after installation: $QT_HOST_INSTALLED_PATH."
+          ls -R $HOME/Qt || echo "$HOME/Qt does not exist or is empty."
           exit 1
         fi
         
-        MIRRORS=(
-          "https://mirrors.dotsrc.org/qtproject/"
-          "https://ftp.fau.de/qtproject/"
-          "https://mirrors.ocf.berkeley.edu/qt/"
-          "https://download.qt.io/" # Default, try last
-        )
-        MAX_ATTEMPTS_PER_MIRROR=3
-        RETRY_DELAY_SECONDS=10
-
-        # --- Install Host Qt ---
-        echo "--- Attempting to install Host Qt (Linux Desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }}) ---"
-        HOST_QT_INSTALL_SUCCESS=false
-        QT_HOST_INSTALLED_PATH_VALUE="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_HOST_ARCH_DIR }}"
-
-        for mirror_url in "${MIRRORS[@]}"; do
-          echo "Trying host Qt installation with mirror: $mirror_url"
-          for attempt in $(seq 1 $MAX_ATTEMPTS_PER_MIRROR); do
-            echo "Attempt $attempt/$MAX_ATTEMPTS_PER_MIRROR for host Qt with mirror $mirror_url"
-            # Clean up previous attempt's partial install to avoid conflicts
-            rm -rf "$QT_HOST_INSTALLED_PATH_VALUE"
-            if aqt install-qt linux desktop ${{ env.QT_VERSION }} ${{ env.QT_HOST_ARCH_INPUT }} -O "$HOME/Qt" --base "$mirror_url"; then
-              if [ -d "$QT_HOST_INSTALLED_PATH_VALUE" ] && [ -f "${QT_HOST_INSTALLED_PATH_VALUE}/bin/androiddeployqt" ]; then
-                echo "Host Qt installed successfully from $mirror_url."
-                echo "Found androiddeployqt at ${QT_HOST_INSTALLED_PATH_VALUE}/bin/androiddeployqt"
-                HOST_QT_INSTALL_SUCCESS=true
-                break # break from attempts
-              else
-                echo "::warning::Host Qt install reported success from $mirror_url, but androiddeployqt or path ${QT_HOST_INSTALLED_PATH_VALUE} is missing. Listing $HOME/Qt:"
-                ls -R $HOME/Qt || echo "$HOME/Qt does not exist."
-              fi
-            else
-              echo "::warning::Host Qt install failed with mirror $mirror_url, attempt $attempt."
-            fi
-            if [ "$HOST_QT_INSTALL_SUCCESS" = true ]; then break; fi
-            if [ "$attempt" -lt "$MAX_ATTEMPTS_PER_MIRROR" ]; then 
-              echo "Retrying in $RETRY_DELAY_SECONDS seconds..."
-              sleep $RETRY_DELAY_SECONDS
-            else 
-              echo "Max attempts reached for mirror $mirror_url for host Qt."
-            fi
-          done
-          if [ "$HOST_QT_INSTALL_SUCCESS" = true ]; then break; fi
-        done
-
-        if [ "$HOST_QT_INSTALL_SUCCESS" = false ]; then
-          echo "::error::Failed to install host Qt from all mirrors after multiple attempts."
-          exit 1
+        if [ ! -f "${QT_HOST_INSTALLED_PATH}/bin/androiddeployqt" ]; then
+            echo "::error:: androiddeployqt not found in ${QT_HOST_INSTALLED_PATH}/bin after host Qt installation."
+            ls -la "${QT_HOST_INSTALLED_PATH}/bin/" || echo "Directory ${QT_HOST_INSTALLED_PATH}/bin/ not found or empty."
+            exit 1
+        else
+            echo "Found androiddeployqt at ${QT_HOST_INSTALLED_PATH}/bin/androiddeployqt"
         fi
-        echo "QT_HOST_PATH=${QT_HOST_INSTALLED_PATH_VALUE}" >> $GITHUB_ENV
-        echo "Added ${QT_HOST_INSTALLED_PATH_VALUE}/bin to GITHUB_PATH for host tools"
-        echo "${QT_HOST_INSTALLED_PATH_VALUE}/bin" >> $GITHUB_PATH
 
-        # --- Install Android Qt ---
-        echo "--- Attempting to install Android Qt (${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }}) ---"
-        ANDROID_QT_INSTALL_SUCCESS=false
-        ANDROID_QT_INSTALLED_PATH_VALUE="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_ANDROID_ARCH }}"
+        echo "QT_HOST_PATH=${QT_HOST_INSTALLED_PATH}" >> $GITHUB_ENV
+        echo "Added ${QT_HOST_INSTALLED_PATH}/bin to GITHUB_PATH for host tools"
+        echo "${QT_HOST_INSTALLED_PATH}/bin" >> $GITHUB_PATH
 
-        for mirror_url in "${MIRRORS[@]}"; do
-          echo "Trying Android Qt installation with mirror: $mirror_url"
-          for attempt in $(seq 1 $MAX_ATTEMPTS_PER_MIRROR); do
-            echo "Attempt $attempt/$MAX_ATTEMPTS_PER_MIRROR for Android Qt with mirror $mirror_url"
-            # Clean up previous attempt's partial install
-            rm -rf "$ANDROID_QT_INSTALLED_PATH_VALUE"
-            if aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -m qt6svg qtpyshared -O "$HOME/Qt" --base "$mirror_url"; then
-              if [ -d "$ANDROID_QT_INSTALLED_PATH_VALUE" ] && [ -d "${ANDROID_QT_INSTALLED_PATH_VALUE}/include/QtCore" ]; then # Check for a common include dir
-                echo "Android Qt installed successfully from $mirror_url."
-                ANDROID_QT_INSTALL_SUCCESS=true
-                break # break from attempts
-              else
-                echo "::warning::Android Qt installed from $mirror_url, but path ${ANDROID_QT_INSTALLED_PATH_VALUE} or a key subdirectory is missing. Listing $HOME/Qt:"
-                ls -R $HOME/Qt || echo "$HOME/Qt does not exist."
-              fi
-            else
-              echo "::warning::Android Qt install failed with mirror $mirror_url, attempt $attempt."
-            fi
-            if [ "$ANDROID_QT_INSTALL_SUCCESS" = true ]; then break; fi
-            if [ "$attempt" -lt "$MAX_ATTEMPTS_PER_MIRROR" ]; then
-              echo "Retrying in $RETRY_DELAY_SECONDS seconds..."
-              sleep $RETRY_DELAY_SECONDS
-            else
-              echo "Max attempts reached for mirror $mirror_url for Android Qt."
-            fi
-          done
-          if [ "$ANDROID_QT_INSTALL_SUCCESS" = true ]; then break; fi
-        done
+        echo "Listing available Qt modules for Android (${{ env.QT_ANDROID_ARCH }})..."
+        # THIS IS A CRUCIAL DEBUGGING STEP - CHECK ITS OUTPUT IF ANDROID QT INSTALL FAILS
+        aqt list-qt linux android --modules ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} || echo "Warning: Failed to list Android Qt modules (for -m option)."
+        echo "Listing available Qt archives for Android (${{ env.QT_ANDROID_ARCH }})..."
+        # THIS IS ALSO CRUCIAL - 'qtpyshared' might be an archive
+        aqt list-qt linux android --archives ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} || echo "Warning: Failed to list Android Qt archives (for --archives option)."
+
+        echo "Installing Qt ${{ env.QT_VERSION }} for Android (${{ env.QT_ANDROID_ARCH }}) into $HOME/Qt ..."
+        # MODIFIED: Try installing Android Qt without any -m options first.
+        # This will install the default set of components for the Android target.
+        # qtpyshared is often included by default for Android.
+        aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -O "$HOME/Qt"
         
-        if [ "$ANDROID_QT_INSTALL_SUCCESS" = false ]; then
-          echo "::error::Failed to install Android Qt from all mirrors after multiple attempts."
+        # If qt6svg is still needed AND it's confirmed as a module by 'aqt list-qt ... --modules'
+        # you could add a separate command:
+        # aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} -m MODULE_NAME_FOR_SVG -O "$HOME/Qt"
+        # Or, if qtpyshared/qt6svg are listed as archives:
+        # aqt install-qt linux android ${{ env.QT_VERSION }} ${{ env.QT_ANDROID_ARCH }} --archives qtpyshared_archive_name qt6svg_archive_name -O "$HOME/Qt"
+
+        ANDROID_QT_INSTALLED_PATH="$HOME/Qt/${{ env.QT_VERSION }}/${{ env.QT_ANDROID_ARCH }}"
+        echo "ANDROID_QT_INSTALLED_PATH=${ANDROID_QT_INSTALLED_PATH}"
+        
+        if [ ! -d "$ANDROID_QT_INSTALLED_PATH" ]; then
+          echo "::error::Qt for Android path not found after installation: $ANDROID_QT_INSTALLED_PATH. Listing $HOME/Qt..."
+          ls -R $HOME/Qt || echo "$HOME/Qt does not exist."
           exit 1
         fi
-        echo "QT_PATH=${ANDROID_QT_INSTALLED_PATH_VALUE}" >> $GITHUB_ENV
-        echo "Qt for Android installed at: ${ANDROID_QT_INSTALLED_PATH_VALUE}"
+        
+        # Check for libpyshared.so specifically
+        if [ ! -f "${ANDROID_QT_INSTALLED_PATH}/lib/libpyshared.so" ]; then
+            echo "::warning:: libpyshared.so not found in ${ANDROID_QT_INSTALLED_PATH}/lib. PySide6 apps may not run."
+            echo "Listing contents of ${ANDROID_QT_INSTALLED_PATH}/lib/ to verify:"
+            ls -la "${ANDROID_QT_INSTALLED_PATH}/lib/" || echo "Directory ${ANDROID_QT_INSTALLED_PATH}/lib/ not found or empty."
+        else
+            echo "Found libpyshared.so at ${ANDROID_QT_INSTALLED_PATH}/lib/libpyshared.so"
+        fi
+
+
+        echo "QT_PATH=${ANDROID_QT_INSTALLED_PATH}" >> $GITHUB_ENV
+        echo "Qt for Android installed at: ${ANDROID_QT_INSTALLED_PATH}"
 
     - name: Verify Environment Variables and Tools
-      shell: bash
       run: |
-        set -eo pipefail
         echo "--- Verifying environment variables ---"
         echo "ANDROID_HOME: $ANDROID_HOME"
-        if [ -z "$ANDROID_HOME" ] || [ ! -d "$ANDROID_HOME" ]; then echo "::error::ANDROID_HOME is not set or not a directory."; exit 1; fi
         echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
-        if [ -z "$ANDROID_NDK_HOME" ] || [ ! -d "$ANDROID_NDK_HOME" ]; then echo "::error::ANDROID_NDK_HOME is not set or not a directory."; exit 1; fi
         echo "JAVA_HOME: $JAVA_HOME"
-        if [ -z "$JAVA_HOME" ] || [ ! -d "$JAVA_HOME" ]; then echo "::error::JAVA_HOME is not set or not a directory."; exit 1; fi
         echo "QT_HOST_PATH: $QT_HOST_PATH"
-        if [ -z "$QT_HOST_PATH" ] || [ ! -d "$QT_HOST_PATH" ]; then echo "::error::QT_HOST_PATH is not set or not a directory."; exit 1; fi
         echo "QT_PATH: $QT_PATH"
-        if [ -z "$QT_PATH" ] || [ ! -d "$QT_PATH" ]; then echo "::error::QT_PATH (Android Qt) is not set or not a directory."; exit 1; fi
-        
-        echo "--- Verifying tool versions and availability ---"
         echo "python version: $(python --version)"
         echo "java version:"
-        java -version || { echo "::error::Java command not found or failed."; exit 1; }
-        
-        echo "pyside6-android-deploy location: $(which pyside6-android-deploy || echo 'pyside6-android-deploy not found in PATH')"
-        if ! command -v pyside6-android-deploy &> /dev/null; then
-            echo "::error::pyside6-android-deploy command could not be found. Ensure PySide6 was installed correctly and its scripts directory is in the PATH."
-            exit 1
-        fi
-        echo "androiddeployqt location: $(which androiddeployqt || echo 'androiddeployqt not found in PATH')"
-        if ! command -v androiddeployqt &> /dev/null; then
-            echo "::error::androiddeployqt command could not be found. Ensure host Qt's bin directory was correctly added to the PATH."
-            exit 1
-        fi
+        java -version
+        echo "pyside6-android-deploy location: $(which pyside6-android-deploy || echo 'pyside6-android-deploy not found')"
+        echo "androiddeployqt location: $(which androiddeployqt || echo 'androiddeployqt not found')"
         echo "PATH: $PATH"
+        
+        if [ -z "$QT_PATH" ]; then echo "::error::QT_PATH (for Android Qt) is not set."; exit 1; fi
+        if [ -z "$QT_HOST_PATH" ]; then echo "::error::QT_HOST_PATH (for Host Qt) is not set."; exit 1; fi
+        if ! command -v androiddeployqt &> /dev/null; then
+            echo "::error::androiddeployqt command could not be found in PATH. Ensure host Qt's bin directory was correctly added to the PATH."
+            exit 1
+        fi
+        if ! command -v pyside6-android-deploy &> /dev/null; then
+            echo "::error::pyside6-android-deploy command could not be found. Ensure PySide6 was installed correctly and its scripts directory is in PATH."
+            exit 1
+        fi
 
     - name: Configure and Build APK
-      shell: bash
       run: |
-        set -eo pipefail
         echo "Current directory: $(pwd)"
-        ls -la # List files to ensure main.py and others are present
+        ls -la
         
         mkdir -p build_android && rm -rf build_android/*
         mkdir -p deployment_output && rm -rf deployment_output/*
         
         echo "Running pyside6-android-deploy..."
-        # Ensure QT_HOST_PATH is also available to pyside6-android-deploy if it needs it
-        # by checking if it's in the PATH already from the previous step.
-        # pyside6-android-deploy usually uses `androiddeployqt` from the system PATH,
-        # which should point to the host Qt's bin directory.
-        
         PRIMARY_ABI="${QT_ANDROID_ARCH#android_}" 
         ANDROID_ABIS_VALUE="$PRIMARY_ABI" 
 
