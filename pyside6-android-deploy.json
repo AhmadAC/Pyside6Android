@@ -1,0 +1,23 @@
+{
+    "appName": "MyQtApp",
+    "applicationPackage": "org.example.myqtandroidapp",
+    "arch": "arm64-v8a",
+    "jdkPath": "",
+    "qtPath": "",
+    "qtHostPath": "",
+    "androidAbis": ["arm64-v8a", "armeabi-v7a"],
+    "entryPoint": "./main.py",
+    "assets": "",
+    "qmlFiles": "",
+    "qmlPaths": [],
+    "useTranslations": false,
+    "translationsPath": "./translations",
+    "translationLanguages": [],
+    "pysidedeployAllowPythonSource": true,
+    "pysidedeployAllowCompiledPlusSource": true,
+    "pysidedeployBlacklist": [],
+    "pysidedeployBasedir": "",
+    "pysidedeployVerboseLevel": 2,
+    "pysidedeployLibLocation": "bundle",
+    "pysidedeployPythonVersion": "3.9"
+}
